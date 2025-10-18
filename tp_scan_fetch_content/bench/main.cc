@@ -29,11 +29,12 @@ int main(int argc, char** argv)
         // Finally the true sizes
         // TODO
         constexpr std::array sizes = {
+            16,
             64,
              63,
              128,
-             524288,
-             1048576
+            // 524288,
+            // 1048576
         };
 
         // Add the name and function to benchmark here

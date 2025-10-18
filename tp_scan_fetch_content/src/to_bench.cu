@@ -26,6 +26,7 @@ template <typename T>
 __global__
 void kogge_stone_scan(raft::device_span<T> buffer)
 {
+    // loading in shared might be faster idk kogge_stone is bad anyways
     // Not managing multiblock here
     int tid = threadIdx.x;
     for (int offset = 1; offset < buffer.size(); offset *= 2)
@@ -41,9 +42,27 @@ void kogge_stone_scan(raft::device_span<T> buffer)
 
 template <typename T>
 __global__
-void kernel_your_scan1(raft::device_span<T> buffer)
+void brent_kung_scan(raft::device_span<T> buffer)
 {
+    // Reduce step
+    int two_pow_i = 1;
+    for (; two_pow_i < buffer.size(); two_pow_i *=2)
+    {
+        int j = two_pow_i * 2 * threadIdx.x - 1;
+        if (j < buffer.size() && (j - two_pow_i) >=0)
+            buffer[j] += buffer[j - two_pow_i];
+        __syncthreads();
+    }
 
+    // Post-Reduce step
+    // keep using offset to manage not power of two sizes
+    for (int two_pow_i_plus_one = two_pow_i; two_pow_i_plus_one > 1; two_pow_i_plus_one /= 2)
+    {
+        int j = two_pow_i_plus_one + two_pow_i_plus_one * threadIdx.x;
+        if (j + two_pow_i_plus_one/2 - 1 < buffer.size())
+            buffer[j + two_pow_i_plus_one/2 - 1] += buffer[j - 1];
+        __syncthreads();
+    }
 }
 
 template <typename T>
@@ -69,8 +88,14 @@ void your_scan(rmm::device_uvector<int>& buffer)
     size_t blocks_num = 1;
     size_t shared_memory_size = 0;
 
-	kogge_stone_scan<int><<<blocks_num, thread_per_block, 0, buffer.stream()>>>(
+	brent_kung_scan<int><<<blocks_num, thread_per_block, 0, buffer.stream()>>>(
         raft::device_span<int>(buffer.data(), buffer.size()));
 
     CUDA_CHECK_ERROR(cudaStreamSynchronize(buffer.stream()));
+    for (int i =0; i < buffer.size(); ++i)
+    {
+        int val;
+        cudaMemcpy(&val, buffer.data() + i, sizeof(int), cudaMemcpyDeviceToHost);
+        //printf("buffer[%d] = %d\n", i, val);
+    }
 }
