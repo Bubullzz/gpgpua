@@ -67,10 +67,27 @@ void brent_kung_scan(raft::device_span<T> buffer)
 
 template <typename T>
 __global__
-void kernel_your_scan2(raft::device_span<T> buffer)
+void sklansky_scan(raft::device_span<T> buffer)
 {
-    // TODO
-    // ...
+    extern __shared__ T sdata[];
+    // Load data into shared memory
+
+    sdata[threadIdx.x] = buffer[threadIdx.x];
+    sdata[threadIdx.x + blockDim.x] = buffer[threadIdx.x + blockDim.x];
+    __syncthreads();
+
+    for (int i = 1; i < buffer.size(); i *= 2)
+    {
+        int j = i - 1 + 2 * (threadIdx.x - threadIdx.x % i);
+        int k = threadIdx.x % i;
+        sdata[j + k + 1] += sdata[j];
+        __syncthreads();
+    }
+
+    // Write back to global memory
+    buffer[threadIdx.x] = sdata[threadIdx.x];
+    buffer[threadIdx.x + blockDim.x] = sdata[threadIdx.x + blockDim.x];
+
 }
 
 template <typename T>
@@ -84,11 +101,11 @@ void kernel_your_scan3(raft::device_span<T> buffer)
 void your_scan(rmm::device_uvector<int>& buffer)
 {
     size_t size = buffer.size();
-    size_t thread_per_block = std::min<size_t>(1024, size); // Hardcoding max threads per block is REALLY faster
+    size_t thread_per_block = std::min<size_t>(1024, size / 2); // Hardcoding max threads per block is REALLY faster
     size_t blocks_num = 1;
-    size_t shared_memory_size = 0;
+    size_t shared_memory_size = sizeof(int) * size;
 
-	brent_kung_scan<int><<<blocks_num, thread_per_block, 0, buffer.stream()>>>(
+	sklansky_scan<int><<<blocks_num, thread_per_block, shared_memory_size, buffer.stream()>>>(
         raft::device_span<int>(buffer.data(), buffer.size()));
 
     CUDA_CHECK_ERROR(cudaStreamSynchronize(buffer.stream()));

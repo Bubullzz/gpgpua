@@ -25,6 +25,6 @@ set(CUDA_ARCHITECTURES "75")
 
 include_directories(src)
 
-add_executable(main src/main.cu src/fix_cpu.cu)
+add_executable(main src/main.cu src/fix_cpu.cu src/fix_gpu_handmade.cu src/fix_gpu_industrial.cu)
 target_compile_options(main PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${OpenMP_CXX_FLAGS}>)
 target_link_libraries(main PUBLIC OpenMP::OpenMP_CXX rmm::rmm raft::raft)

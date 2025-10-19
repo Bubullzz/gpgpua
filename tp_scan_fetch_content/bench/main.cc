@@ -31,8 +31,9 @@ int main(int argc, char** argv)
         constexpr std::array sizes = {
             16,
             64,
-             63,
+            // 63,
              128,
+             2048,
             // 524288,
             // 1048576
         };

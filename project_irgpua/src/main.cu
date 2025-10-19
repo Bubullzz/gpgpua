@@ -1,6 +1,8 @@
 #include "image.hh"
 #include "pipeline.hh"
 #include "fix_cpu.cuh"
+#include "fix_gpu_handmade.cuh"
+#include "fix_gpu_industrial.cuh"
 
 #include <vector>
 #include <iostream>
@@ -8,6 +10,7 @@
 #include <sstream>
 #include <filesystem>
 #include <numeric>
+#include <rmm/device_uvector.hpp>
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
@@ -46,8 +49,21 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
         // You must get the image from the pipeline as they arrive and launch computations right away
         // There are still ways to speeds this process of course
         images[i] = pipeline.get_image(i);
-        fix_image_cpu(images[i]);
-    }
+        
+        // INDUSTRIAL VERSION
+        fix_image_gpu_industrial(images[i]);
+        printf("Finished image %d\n", i); // making sure we are on different streams
+        
+        // HANDMADE VERSION
+        /*
+        size_t nb_threads = 1024;
+        size_t rounded_size = ((images[i].size() + nb_threads - 1) / nb_threads) * nb_threads;
+        rmm::device_uvector<int> d_image(rounded_size , rmm::cuda_stream_default);
+        cudaMemcpy(d_image.data(), images[i].buffer, images[i].size() * sizeof(int), cudaMemcpyHostToDevice);
+        fix_image_gpu_handmade(d_image, images[i].size());
+        cudaMemcpy(images[i].buffer, d_image.data(), images[i].size() * sizeof(int), cudaMemcpyDeviceToHost);
+        */
+        }
 
     std::cout << "Done with compute, starting stats" << std::endl;
 
