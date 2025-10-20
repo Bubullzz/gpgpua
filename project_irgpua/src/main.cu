@@ -75,7 +75,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
         fix_image<mode>(images[i]);
     }
 
-    std::cout << "Done with compute, starting stats" << std::endl;
+    std::cout << "Done with compute, starting computing total" << std::endl;
 
     // -- All images are now fixed : compute stats (total then sort)
 
@@ -92,6 +92,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
         image.to_sort.total = std::reduce(image.buffer, image.buffer + image_size, 0);
     }
 
+    std::cout << "Done with total, starting sort" << std::endl;
     // - All totals are known, sort images accordingly (OPTIONAL)
     // Moving the actual images is too expensive, sort image indices instead
     // Copying to an id array and sort it instead
@@ -111,14 +112,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
     });
     
     // Check that images are sorted correctly
-    std::cout << "Checking sorting..." << std::endl;
-    for (int i = 0; i < nb_images - 1; ++i)
-        if (to_sort[i].total > to_sort[i + 1].total)
-        {
-            std::cerr << "Sorting error on image id :" << to_sort[i].id << std::endl;
-            return 1;
-        }
-    std::cout << "Sorting OK!" << std::endl;
+    std::cout << "Done with sort !" << std::endl;
 
     // TODO : Test here that you have the same results
     // You can compare visually and should compare image vectors values and "total" values
@@ -132,20 +126,19 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
         207334021, 268424419, 432916359, 51973720, 24489209, 80124196, 29256842,
         25803206, 34550754
     };
-
+    std::cout << "Checking totals..." << std::endl;
     // Compare computed totals to expected ones
     for (int i = 0; i < nb_images; ++i)
     {
-        auto computed = images[i].to_sort.total;
-        auto expected = expected_totals[i];
+        long computed = images[i].to_sort.total;
+        long expected = expected_totals[i];
 
-        float diff = (computed > expected ? computed - expected : expected - computed);
-        float relative_diff = diff / static_cast<float>(expected);
+        float diff = computed - expected;
         std::cout << "Image #" << images[i].to_sort.id
                 << " total: " << computed
-                << " (diff: " << diff << " = " << relative_diff * 100 << "%)";
+                << " (diff: " << diff << ")";
 
-        if (relative_diff < 0.01f) { // 1% tolerance, my eyes at least can't see the difference
+        if (diff == 0) {
             std::cout << " ✅" << std::endl;
         } else {
             std::cout << " ❌" << std::endl;
@@ -156,6 +149,15 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
         oss << "Image#" << images[i].to_sort.id << ".pgm";
         images[i].write(oss.str());
     }
+
+    std::cout << "Checking sorting..." << std::endl;
+    for (int i = 0; i < nb_images - 1; ++i)
+        if (to_sort[i].total > to_sort[i + 1].total)
+        {
+            std::cerr << "Sorting error on image id :" << to_sort[i].id << std::endl;
+            return 1;
+        }
+    std::cout << "Sorting OK!" << std::endl;
 
     std::cout << "Done, the internet is safe now :)" << std::endl;
 

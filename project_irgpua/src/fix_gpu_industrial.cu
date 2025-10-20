@@ -11,18 +11,18 @@
 #include <thrust/copy.h>
 #include <thrust/execution_policy.h>
 
-struct test //: public thrust::unary_function<int, int>
+struct hist_equalize_functor //: public thrust::unary_function<int, int>
 {
     const int cdf_min;
     const float divider;
     const int* cum_hist;
 
-    test(int _cdf_min, int _divider, const int* _cum_hist) : cdf_min(_cdf_min), divider(_divider), cum_hist(_cum_hist) {}
+    hist_equalize_functor(int _cdf_min, int _divider, const int* _cum_hist) : cdf_min(_cdf_min), divider(_divider), cum_hist(_cum_hist) {}
 
     __host__ __device__
     int operator()(int val) const {
         int cdf_pixel = cum_hist[val];
-        return static_cast<int>((cdf_pixel - cdf_min) / divider * 255.0f);
+        return static_cast<int>((cdf_pixel - cdf_min) / divider * 255.0f + 0.5f); // cast + 0.5f == roundf
     }
 };
 
@@ -127,11 +127,9 @@ void fix_image_gpu_industrial(Image& to_fix)
         buffer1.begin(),
         buffer1.begin() + new_size,
         buffer2.begin(),
-        test(cdf_min, divider, cum_hist_buffer.data())
+        hist_equalize_functor(cdf_min, divider, cum_hist_buffer.data())
     );
 
     cudaMemcpy(to_fix.buffer, buffer2.data(), new_size * sizeof(int), cudaMemcpyDeviceToHost);
-    return; 
-    
-
+    return;
 }
