@@ -19,10 +19,10 @@ struct hist_equalize_functor //: public thrust::unary_function<int, int>
 
     hist_equalize_functor(int _cdf_min, int _divider, const int* _cum_hist) : cdf_min(_cdf_min), divider(_divider), cum_hist(_cum_hist) {}
 
-    __host__ __device__
+    __device__
     int operator()(int val) const {
         int cdf_pixel = cum_hist[val];
-        return static_cast<int>((cdf_pixel - cdf_min) / divider * 255.0f + 0.5f); // cast + 0.5f == roundf
+        return static_cast<int>((cdf_pixel - cdf_min) / divider * 255.0f + 0.5f); // cast<int>(x + 0.5f) <==> roundf(x)
     }
 };
 
@@ -31,6 +31,7 @@ bool is_garbage(int val) {
     return val == -27;
 }
 
+// This function fixes the image and calculates the total pixel values
 void fix_image_gpu_industrial(Image& to_fix)
 {
     cudaStream_t stream;
@@ -55,6 +56,7 @@ void fix_image_gpu_industrial(Image& to_fix)
     );
     size_t new_size = end - buffer2.begin();
     // Apply add and substracts
+    // possible optimization, do a cast into int4 and do +1 -5 +3 -8 in one shot, wait for ncu to see if usefull
     thrust::transform(
         exec,
         buffer2.begin(),
@@ -106,6 +108,7 @@ void fix_image_gpu_industrial(Image& to_fix)
         cum_hist_buffer.begin()
     );
 
+    // Find cdf_min
     auto first_none_zero = thrust::find_if(
         exec,
         cum_hist_buffer.begin(),
@@ -115,12 +118,8 @@ void fix_image_gpu_industrial(Image& to_fix)
     // Copy that value to host
     int cdf_min = 0;
     cudaMemcpy(&cdf_min, first_none_zero, sizeof(int), cudaMemcpyDeviceToHost);
-
-    float divider = static_cast<float>(new_size - cdf_min);
     
-    // Copy last value of cumulative histogram to host for debugging
-    int cum_last = 0;
-    cudaMemcpy(&cum_last, cum_hist_buffer.data() + 255, sizeof(int), cudaMemcpyDeviceToHost);
+    float divider = static_cast<float>(new_size - cdf_min); // could do /255.0f here to remove one compute in the functor
 
     thrust::transform(
         exec,
@@ -129,7 +128,17 @@ void fix_image_gpu_industrial(Image& to_fix)
         buffer2.begin(),
         hist_equalize_functor(cdf_min, divider, cum_hist_buffer.data())
     );
+    
+    int total = thrust::reduce(
+        exec,
+        buffer2.begin(),
+        buffer2.begin() + new_size
+    );
 
+    //cudaMemcpy(&(to_fix.to_sort.total), &total, sizeof(int), cudaMemcpyHostToDevice);
+    to_fix.to_sort.total = total;
+
+    // I Should dig into cudaMemcpyAsync 
     cudaMemcpy(to_fix.buffer, buffer2.data(), new_size * sizeof(int), cudaMemcpyDeviceToHost);
     return;
 }

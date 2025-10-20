@@ -31,6 +31,24 @@ void fix_image(Image& to_fix)
     }
 }
 
+template <ProcessingMode mode>
+void compute_total(std::vector<Image>& images, int nb_images)
+{
+    if constexpr (mode == ProcessingMode::CPU) {
+        #pragma omp parallel for
+        for (int i = 0; i < nb_images; ++i)
+        {
+            auto& image = images[i];
+            const int image_size = image.width * image.height;
+            image.to_sort.total = std::reduce(image.buffer, image.buffer + image_size, 0);
+        }
+    } else if constexpr (mode == ProcessingMode::GPU_Handmade) {
+        return; // Already computed in fix_image_gpu_handmade
+    } else {
+        return; // Already computed in fix_image_gpu_industrial
+    }
+}
+
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
     // Choose processing mode here
@@ -84,13 +102,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
     // TODO : make it GPU compatible (aka faster)
     // You can use multiple CPU threads for your GPU version using openmp or not
     // Up to you :)
-    #pragma omp parallel for
-    for (int i = 0; i < nb_images; ++i)
-    {
-        auto& image = images[i];
-        const int image_size = image.width * image.height;
-        image.to_sort.total = std::reduce(image.buffer, image.buffer + image_size, 0);
-    }
+    compute_total<mode>(images, nb_images);
 
     std::cout << "Done with total, starting sort" << std::endl;
     // - All totals are known, sort images accordingly (OPTIONAL)
