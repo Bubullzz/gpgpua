@@ -4,4 +4,4 @@
 
 #include <rmm/device_uvector.hpp>
 
-void fix_image_gpu_handmade(rmm::device_uvector<int>& buffer, int size);
+void fix_image_gpu_handmade(Image& to_fix);

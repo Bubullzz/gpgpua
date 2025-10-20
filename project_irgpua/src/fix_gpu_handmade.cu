@@ -90,13 +90,13 @@ __global__ void fix_image(raft::device_span<int> buffer) {
 
 }
 
-void fix_image_gpu_handmade(rmm::device_uvector<int>& buffer, int size) {
-    size_t max_threads = 1024;
+void fix_image_gpu_handmade(Image& to_fix) { //rmm::device_uvector<int>& buffer, int size) {
+    /*size_t max_threads = 1024;
     size_t thread_per_block = max_threads;
     size_t threads = size / 4; // each thread manages 4 pixels (useful for +5 -1 etc...)
     size_t blocks = (threads + thread_per_block - 1) / thread_per_block;
     // each thread = 4 pixels and 4 predicate values
     size_t shared_memory_size = thread_per_block * 4 * 2 * sizeof(int);
     fix_image<<<blocks, thread_per_block, shared_memory_size, buffer.stream()>>>(raft::device_span<int>(buffer.data(), size));
-    cudaStreamSynchronize(buffer.stream());
+    cudaStreamSynchronize(buffer.stream()); */
 }

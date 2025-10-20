@@ -18,8 +18,25 @@ enum class ProcessingMode {
     GPU_Industrial
 };
 
+// Compile-time dispatch to the correct processing mode so no performance loss hihi ^^
+template <ProcessingMode mode>
+void fix_image(Image& to_fix)
+{
+    if constexpr (mode == ProcessingMode::CPU) {
+        fix_image_cpu(to_fix);
+    } else if constexpr (mode == ProcessingMode::GPU_Handmade) {
+        fix_image_gpu_handmade(to_fix);
+    } else {
+        fix_image_gpu_industrial(to_fix);
+    }
+}
+
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
+    // Choose processing mode here
+    // {CPU, GPU_Handmade, GPU_Industrial} <-- copy-paste one of these
+    const ProcessingMode mode = ProcessingMode::GPU_Industrial;
+    
     // -- Pipeline initialization
 
     std::cout << "File loading..." << std::endl;
@@ -55,24 +72,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
         // You must get the image from the pipeline as they arrive and launch computations right away
         // There are still ways to speeds this process of course
         images[i] = pipeline.get_image(i);
-        
-        // INDUSTRIAL VERSION
-        fix_image_gpu_industrial(images[i]);
-        //printf("Finished image %d\n", i); // making sure we are on different streams
-        
-        // HANDMADE VERSION
-        /*
-        size_t nb_threads = 1024;
-        size_t rounded_size = ((images[i].size() + nb_threads - 1) / nb_threads) * nb_threads;
-        rmm::device_uvector<int> d_image(rounded_size , rmm::cuda_stream_default);
-        cudaMemcpy(d_image.data(), images[i].buffer, images[i].size() * sizeof(int), cudaMemcpyHostToDevice);
-        fix_image_gpu_handmade(d_image, images[i].size());
-        cudaMemcpy(images[i].buffer, d_image.data(), images[i].size() * sizeof(int), cudaMemcpyDeviceToHost);
-        */
-
-        // CPU VERSION
-        //fix_image_cpu(images[i]);
-        }
+        fix_image<mode>(images[i]);
+    }
 
     std::cout << "Done with compute, starting stats" << std::endl;
 
