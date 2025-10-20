@@ -45,7 +45,6 @@ void fix_image_cpu(Image& to_fix)
         else if (i % 4 == 3)
             to_fix.buffer[i] -= 8;
     }
-
     // #3 Histogram equalization
 
     // Histogram
