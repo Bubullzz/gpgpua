@@ -129,6 +129,7 @@ void fix_image_gpu_industrial(Image& to_fix)
         hist_equalize_functor(cdf_min, divider, cum_hist_buffer.data())
     );
     
+    // Taking advantage of the fact that full image is already loaded in buffer2 to compute total
     int total = thrust::reduce(
         exec,
         buffer2.begin(),

@@ -1,5 +1,6 @@
 #include "image.hh"
 #include "pipeline.hh"
+#include "dispatcher.hh"
 #include "fix_cpu.cuh"
 #include "fix_gpu_handmade.cuh"
 #include "fix_gpu_industrial.cuh"
@@ -12,48 +13,12 @@
 #include <numeric>
 #include <rmm/device_uvector.hpp>
 
-enum class ProcessingMode {
-    CPU,
-    GPU_Handmade,
-    GPU_Industrial
-};
-
-// Compile-time dispatch to the correct processing mode so no performance loss hihi ^^
-template <ProcessingMode mode>
-void fix_image(Image& to_fix)
-{
-    if constexpr (mode == ProcessingMode::CPU) {
-        fix_image_cpu(to_fix);
-    } else if constexpr (mode == ProcessingMode::GPU_Handmade) {
-        fix_image_gpu_handmade(to_fix);
-    } else {
-        fix_image_gpu_industrial(to_fix);
-    }
-}
-
-template <ProcessingMode mode>
-void compute_total(std::vector<Image>& images, int nb_images)
-{
-    if constexpr (mode == ProcessingMode::CPU) {
-        #pragma omp parallel for
-        for (int i = 0; i < nb_images; ++i)
-        {
-            auto& image = images[i];
-            const int image_size = image.width * image.height;
-            image.to_sort.total = std::reduce(image.buffer, image.buffer + image_size, 0);
-        }
-    } else if constexpr (mode == ProcessingMode::GPU_Handmade) {
-        return; // Already computed in fix_image_gpu_handmade
-    } else {
-        return; // Already computed in fix_image_gpu_industrial
-    }
-}
-
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
     // Choose processing mode here
     // {CPU, GPU_Handmade, GPU_Industrial} <-- copy-paste one of these
     const ProcessingMode mode = ProcessingMode::GPU_Industrial;
+    print_mode<mode>();
     
     // -- Pipeline initialization
 
@@ -99,18 +64,12 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 
     // - First compute the total of each image
 
-    // TODO : make it GPU compatible (aka faster)
-    // You can use multiple CPU threads for your GPU version using openmp or not
-    // Up to you :)
+    // DONE : make it GPU compatible (aka faster)
     compute_total<mode>(images, nb_images);
 
     std::cout << "Done with total, starting sort" << std::endl;
-    // - All totals are known, sort images accordingly (OPTIONAL)
-    // Moving the actual images is too expensive, sort image indices instead
-    // Copying to an id array and sort it instead
-
-    // TODO OPTIONAL : for you GPU version you can store it the way you want
-    // But just like the CPU version, moving the actual images while sorting will be too slow
+    
+    // Sorting the images
     using ToSort = Image::ToSort;
     std::vector<ToSort> to_sort(nb_images);
     std::generate(to_sort.begin(), to_sort.end(), [n = 0, images] () mutable
@@ -123,7 +82,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
         return a.total < b.total;
     });
     
-    // Check that images are sorted correctly
     std::cout << "Done with sort !" << std::endl;
 
     // TODO : Test here that you have the same results
@@ -162,6 +120,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
         images[i].write(oss.str());
     }
 
+    // Check that images are sorted correctly
     std::cout << "Checking sorting..." << std::endl;
     for (int i = 0; i < nb_images - 1; ++i)
         if (to_sort[i].total > to_sort[i + 1].total)
