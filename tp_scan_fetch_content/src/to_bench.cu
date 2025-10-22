@@ -23,6 +23,7 @@ void baseline_scan(rmm::device_uvector<int>& buffer)
     CUDA_CHECK_ERROR(cudaStreamSynchronize(buffer.stream()));
 }
 
+// NOT OPTIMIZED AND NO LOOKBACK
 template <typename T>
 __global__
 void kogge_stone_scan(raft::device_span<T> buffer)
@@ -41,6 +42,7 @@ void kogge_stone_scan(raft::device_span<T> buffer)
     }
 }
 
+// NOT OPTIMIZED AND NO LOOKBACK
 template <typename T>
 __global__
 void brent_kung_scan(raft::device_span<T> buffer)
@@ -66,6 +68,8 @@ void brent_kung_scan(raft::device_span<T> buffer)
     }
 }
 
+// A bit optimized and looking back :3
+// Assuming right padding to not have to do bounds checking
 template <typename T>
 __global__
 void sklansky_scan(raft::device_span<T> buffer,
@@ -78,12 +82,11 @@ void sklansky_scan(raft::device_span<T> buffer,
     __shared__ int my_block_id;
     __shared__ int to_add;
 
-    cuda::atomic_ref<int , cuda::thread_scope_device> block(*block_num);
+    cuda::atomic_ref<int, cuda::thread_scope_device> block(*block_num);
 
     if (threadIdx.x == 0)
     {
         my_block_id = block.fetch_add(1);
-        states[my_block_id] = 0; // computing state
         to_add = 0;
     }
     __syncthreads();
@@ -123,7 +126,7 @@ void sklansky_scan(raft::device_span<T> buffer,
             {
                 to_add += local_sums[b];
             }
-            else // state == 2 ? done ??
+            else // global value ready
             {
                 to_add += global_sums[b];
                 break;
@@ -147,14 +150,12 @@ void your_scan(rmm::device_uvector<int>& buffer)
     size_t shared_memory_size = sizeof(int) * threads_per_block * 2;
 
     rmm::device_scalar<int> block_num(0, buffer.stream());
-    rmm::device_uvector<int> states(nb_blocks, buffer.stream());
+    rmm::device_uvector<int> states(nb_blocks, buffer.stream()); // Could use uint8_t but does not work with atomics
     rmm::device_uvector<int> local_sums(nb_blocks, buffer.stream());
     rmm::device_uvector<int> global_sums(nb_blocks, buffer.stream());
 
-    // init states to 0, likely not useful
+    // Init all states to 0 at once
     cudaMemsetAsync(states.data(), 0, nb_blocks * sizeof(int), buffer.stream());
-    cudaMemsetAsync(local_sums.data(), 0, nb_blocks * sizeof(int), buffer.stream());
-    cudaMemsetAsync(global_sums.data(), 0, nb_blocks * sizeof(int), buffer.stream());
 
     sklansky_scan<int><<<nb_blocks, threads_per_block, shared_memory_size, buffer.stream()>>>(
         raft::device_span<int>(buffer.data(), buffer.size()),
@@ -165,10 +166,10 @@ void your_scan(rmm::device_uvector<int>& buffer)
 
     CUDA_CHECK_ERROR(cudaStreamSynchronize(buffer.stream()));
     if (false) // Debug print
-        for (int i =0; i < buffer.size(); ++i)
-        {
-            int val;
-            cudaMemcpy(&val, buffer.data() + i, sizeof(int), cudaMemcpyDeviceToHost);
-            printf("buffer[%d] = %d\n", i, val);
-        }
+    {
+        std::vector<int> host_buf(buffer.size());
+        cudaMemcpy(host_buf.data(), buffer.data(), buffer.size() * sizeof(int), cudaMemcpyDeviceToHost);
+        for (size_t i = 0; i < buffer.size(); ++i)
+            printf("buffer[%zu] = %d\n", i, host_buf[i]);
+    }
 }
