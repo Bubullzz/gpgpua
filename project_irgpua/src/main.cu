@@ -17,7 +17,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
     // Choose processing mode here
     // {CPU, GPU_Handmade, GPU_Industrial} <-- copy-paste one of these
-    const ProcessingMode mode = ProcessingMode::GPU_Industrial;
+    const ProcessingMode mode = ProcessingMode::CPU;
     print_mode<mode>();
     
     // -- Pipeline initialization
@@ -135,7 +135,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
     // Cleaning
     // TODO : Don't forget to update this if you change allocation style
     for (int i = 0; i < nb_images; ++i)
+    {
         free(images[i].buffer);
-
+        free(images[i].char_buffer);
+    }
     return 0;
 }

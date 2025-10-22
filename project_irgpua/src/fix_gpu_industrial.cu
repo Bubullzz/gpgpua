@@ -9,6 +9,7 @@
 #include <rmm/device_scalar.hpp>
 
 #include <thrust/copy.h>
+#include <thrust/gather.h>
 #include <thrust/execution_policy.h>
 
 struct hist_equalize_functor //: public thrust::unary_function<int, int>
@@ -34,10 +35,12 @@ bool is_garbage(int val) {
 // This function fixes the image and calculates the total pixel values
 void fix_image_gpu_industrial(Image& to_fix)
 {
+    // Define the stream for current image
     cudaStream_t stream;
     cudaStreamCreate(&stream);    
     auto exec = thrust::cuda::par.on(stream);
 
+    // Allocate device buffers
     rmm::device_uvector<int> buffer1(to_fix.size(), stream);
     rmm::device_uvector<int> buffer2(to_fix.size(), stream);
     rmm::device_uvector<int> cum_hist_buffer(256, stream);
@@ -45,7 +48,7 @@ void fix_image_gpu_industrial(Image& to_fix)
 
 
     // Remove -27 values 
-    auto end =thrust::copy_if(
+    auto end = thrust::copy_if(
         exec,
         buffer1.begin(),
         buffer1.end(),
@@ -55,22 +58,23 @@ void fix_image_gpu_industrial(Image& to_fix)
         }
     );
     size_t new_size = end - buffer2.begin();
-    // Apply add and substracts
-    // possible optimization, do a cast into int4 and do +1 -5 +3 -8 in one shot, wait for ncu to see if usefull
+
+    // Apply adds and substracts
+    int4* buffer2_as_int4 = reinterpret_cast<int4*>(buffer2.begin());
+    size_t num_int4 = (new_size + 3) / 4;
+    int4* buffer1_as_int4 = reinterpret_cast<int4*>(buffer1.begin());
     thrust::transform(
         exec,
-        buffer2.begin(),
-        buffer2.begin() + new_size,
-        thrust::counting_iterator<int>(0), // indices
-        buffer1.begin(),
-        [] __device__ (int val, int idx) {
-            switch (idx % 4) {
-                case 0: return val + 1;
-                case 1: return val - 5;
-                case 2: return val + 3;
-                case 3: return val - 8;
-            }
-            return val; // should not happen
+        buffer2_as_int4,
+        buffer2_as_int4 + num_int4,
+        buffer1_as_int4,
+        [] __device__ (int4 val) {
+            int4 res;
+            res.x = val.x + 1;
+            res.y = val.y - 5;
+            res.z = val.z + 3;
+            res.w = val.w - 8;
+            return res;
         }
     );
     
@@ -119,16 +123,28 @@ void fix_image_gpu_industrial(Image& to_fix)
     int cdf_min = 0;
     cudaMemcpy(&cdf_min, first_none_zero, sizeof(int), cudaMemcpyDeviceToHost);
     
-    float divider = static_cast<float>(new_size - cdf_min); // could do /255.0f here to remove one compute in the functor
-
+    
+    // Pre-compute all Hist-equalized values once. Could do that in CPU maybe, should test
+    float divider = new_size - cdf_min;
     thrust::transform(
+        exec,
+        cum_hist_buffer.begin(),
+        cum_hist_buffer.end(),
+        cum_hist_buffer.begin(),
+        [=] __device__ (int val) {
+            return static_cast<int>((val - cdf_min) / divider * 255.0f + 0.5f); // cast<int>(x + 0.5f) <==> roundf(x)
+        }
+    );
+    
+    // Apply histogram equalization using the precomputed values
+    thrust::gather(
         exec,
         buffer1.begin(),
         buffer1.begin() + new_size,
-        buffer2.begin(),
-        hist_equalize_functor(cdf_min, divider, cum_hist_buffer.data())
+        cum_hist_buffer.begin(),
+        buffer2.begin()
     );
-    
+
     // Taking advantage of the fact that full image is already loaded in buffer2 to compute total
     int total = thrust::reduce(
         exec,
@@ -136,10 +152,14 @@ void fix_image_gpu_industrial(Image& to_fix)
         buffer2.begin() + new_size
     );
 
-    //cudaMemcpy(&(to_fix.to_sort.total), &total, sizeof(int), cudaMemcpyHostToDevice);
     to_fix.to_sort.total = total;
+
+    // Will be useful when I refactor types to gain performances
+    // to_fix.char_buffer = malloc(new_size * sizeof(char));
 
     // I Should dig into cudaMemcpyAsync 
     cudaMemcpy(to_fix.buffer, buffer2.data(), new_size * sizeof(int), cudaMemcpyDeviceToHost);
+    
+    // Ok i guess i love thrust now
     return;
 }

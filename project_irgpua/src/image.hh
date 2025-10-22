@@ -44,6 +44,7 @@ struct Image
         {
             // TODO : Isn't there a better way to allocate the CPU Memory
             // To speed up the Host-to-Device Transfert ?
+            // LOAD DATA TO PINNED MEMORY
             buffer = (int *)malloc(width * height * sizeof(int));
             infile.seekg(1, infile.cur);
             for (int i = 0; i < width * height; ++i)
@@ -99,6 +100,16 @@ struct Image
         outfile << "P5" << "\n"
                 << width << " " << height << "\n"
                 << 255 << "\n";
+        
+        if (char_buffer != nullptr) {
+            std::cout << "Using char buffer for output." << std::endl;
+            for (int i = 0; i < height * width; ++i)
+            {
+                uint8_t val = char_buffer[i];
+                outfile << val;
+            }
+            return;
+        }
 
         for (int i = 0; i < height * width; ++i)
         {
@@ -114,6 +125,7 @@ struct Image
     }
 
     int *buffer;
+    unsigned char *char_buffer = nullptr; // Added this myself, 4 times less data !
     int height = -1;
     int width = -1;
     int actual_size = -1;
