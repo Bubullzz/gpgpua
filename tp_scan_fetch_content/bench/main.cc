@@ -36,7 +36,8 @@ int main(int argc, char** argv)
              2048,
             4096,
             8192 * 64,
-            1048576
+            1048576,
+            1048576 * 64,
         };
 
         // Add the name and function to benchmark here

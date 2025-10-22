@@ -7,14 +7,6 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/device_scalar.hpp>
 
-
-#define MAX_BLOCKS 1024
-
-__device__ int global_sums[MAX_BLOCKS];
-__device__ int local_sums[MAX_BLOCKS];
-__device__ int states[MAX_BLOCKS]; // 0=init, 1=waiting, 2=done
-
-
 template <typename T>
 __global__
 void kernel_scan_baseline(raft::device_span<T> buffer)
@@ -76,12 +68,17 @@ void brent_kung_scan(raft::device_span<T> buffer)
 
 template <typename T>
 __global__
-void sklansky_scan(raft::device_span<T> buffer, int* block_num)
+void sklansky_scan(raft::device_span<T> buffer,
+                   int* block_num,
+                   raft::device_span<int> states,
+                   raft::device_span<T> local_sums,
+                   raft::device_span<T> global_sums)
 {
     extern __shared__ T sdata[];
-    cuda::atomic_ref<int , cuda::thread_scope_device> block(*block_num);
     __shared__ int my_block_id;
     __shared__ int to_add;
+
+    cuda::atomic_ref<int , cuda::thread_scope_device> block(*block_num);
 
     if (threadIdx.x == 0)
     {
@@ -103,6 +100,7 @@ void sklansky_scan(raft::device_span<T> buffer, int* block_num)
         sdata[j + k + 1] += sdata[j];
         __syncthreads();
     }
+
     // Block result is done, need to add previous block results
     if (threadIdx.x == 0)
     {
@@ -141,24 +139,29 @@ void sklansky_scan(raft::device_span<T> buffer, int* block_num)
     buffer[my_block_id * blockDim.x * 2 + threadIdx.x + blockDim.x] = sdata[threadIdx.x + blockDim.x] + to_add;
 }
 
-template <typename T>
-__global__
-void kernel_your_scan3(raft::device_span<T> buffer)
-{
-    // TODO
-    // ...
-}
-
 void your_scan(rmm::device_uvector<int>& buffer)
 {
     size_t size = buffer.size() / 2; // assuming even size for simplicity + 2 elements per thread
-    size_t thread_per_block = std::min<size_t>(1024, size); // Hardcoding max threads per block is REALLY faster
-    size_t nb_blocks = (size + thread_per_block -1) / (thread_per_block);
-    size_t shared_memory_size = sizeof(int) * thread_per_block * 2;
-    rmm::device_scalar<int> block_num(0, buffer.stream());
+    size_t threads_per_block = std::min<size_t>(1024, size); // Hardcoding max threads per block is REALLY faster
+    size_t nb_blocks = (size + threads_per_block -1) / (threads_per_block);
+    size_t shared_memory_size = sizeof(int) * threads_per_block * 2;
 
-	sklansky_scan<int><<<nb_blocks, thread_per_block, shared_memory_size, buffer.stream()>>>(
-        raft::device_span<int>(buffer.data(), buffer.size()), block_num.data());
+    rmm::device_scalar<int> block_num(0, buffer.stream());
+    rmm::device_uvector<int> states(nb_blocks, buffer.stream());
+    rmm::device_uvector<int> local_sums(nb_blocks, buffer.stream());
+    rmm::device_uvector<int> global_sums(nb_blocks, buffer.stream());
+
+    // init states to 0, likely not useful
+    cudaMemsetAsync(states.data(), 0, nb_blocks * sizeof(int), buffer.stream());
+    cudaMemsetAsync(local_sums.data(), 0, nb_blocks * sizeof(int), buffer.stream());
+    cudaMemsetAsync(global_sums.data(), 0, nb_blocks * sizeof(int), buffer.stream());
+
+    sklansky_scan<int><<<nb_blocks, threads_per_block, shared_memory_size, buffer.stream()>>>(
+        raft::device_span<int>(buffer.data(), buffer.size()),
+        block_num.data(),
+        raft::device_span<int>(states.data(), nb_blocks),
+        raft::device_span<int>(local_sums.data(), nb_blocks),
+        raft::device_span<int>(global_sums.data(), nb_blocks));
 
     CUDA_CHECK_ERROR(cudaStreamSynchronize(buffer.stream()));
     if (false) // Debug print
