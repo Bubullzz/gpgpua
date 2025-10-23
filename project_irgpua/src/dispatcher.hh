@@ -2,7 +2,7 @@
 #include "fix_cpu.cuh"
 #include "fix_gpu_handmade.cuh"
 #include "fix_gpu_industrial.cuh"
-
+#include "image.hh"
 #include <vector>
 #include <sstream>
 #include <numeric>
@@ -43,6 +43,21 @@ void compute_total(std::vector<Image>& images, int nb_images)
         return; // Already computed in fix_image_gpu_industrial
     }
 }
+
+template <ProcessingMode mode>
+void sort(std::vector<Image::ToSort>& to_sort, int nb_images)
+{
+    if constexpr (mode == ProcessingMode::CPU) {
+        std::sort(to_sort.begin(), to_sort.end(), [](Image::ToSort a, Image::ToSort b) {
+        return a.total < b.total;
+    });
+    } else if constexpr (mode == ProcessingMode::GPU_Handmade) {
+        return; // TODO
+    } else { // GPU_Industrial
+        sort_gpu_industrial(to_sort, nb_images);
+    }
+}
+
 
 template <ProcessingMode mode>
 void print_mode()

@@ -17,7 +17,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
     // Choose processing mode here
     // {CPU, GPU_Handmade, GPU_Industrial} <-- copy-paste one of these
-    const ProcessingMode mode = ProcessingMode::CPU;
+    const ProcessingMode mode = ProcessingMode::GPU_Industrial;
     print_mode<mode>();
     
     // -- Pipeline initialization
@@ -76,11 +76,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
     {
         return images[n++].to_sort;
     });
-    
-    // TODO OPTIONAL : make it GPU compatible (aka faster)
-    std::sort(to_sort.begin(), to_sort.end(), [](ToSort a, ToSort b) {
-        return a.total < b.total;
-    });
+
+    sort<mode>(to_sort, nb_images);
+
     
     std::cout << "Done with sort !" << std::endl;
 
@@ -129,7 +127,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
             return 1;
         }
     std::cout << "Sorting OK!" << std::endl;
-
     std::cout << "Done, the internet is safe now :)" << std::endl;
 
     // Cleaning

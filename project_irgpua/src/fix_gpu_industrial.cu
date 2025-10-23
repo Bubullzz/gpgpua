@@ -9,6 +9,7 @@
 #include <rmm/device_scalar.hpp>
 
 #include <thrust/copy.h>
+#include <thrust/sort.h>
 #include <thrust/gather.h>
 #include <thrust/execution_policy.h>
 
@@ -44,7 +45,7 @@ void fix_image_gpu_industrial(Image& to_fix)
     rmm::device_uvector<int> buffer1(to_fix.size(), stream);
     rmm::device_uvector<int> buffer2(to_fix.size(), stream);
     rmm::device_uvector<int> cum_hist_buffer(256, stream);
-    cudaMemcpy(buffer1.data(), to_fix.buffer, to_fix.size() * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpyAsync(buffer1.data(), to_fix.buffer, to_fix.size() * sizeof(int), cudaMemcpyHostToDevice, stream);
 
 
     // Remove -27 values 
@@ -121,7 +122,7 @@ void fix_image_gpu_industrial(Image& to_fix)
     
     // Copy that value to host
     int cdf_min = 0;
-    cudaMemcpy(&cdf_min, first_none_zero, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpyAsync(&cdf_min, first_none_zero, sizeof(int), cudaMemcpyDeviceToHost, stream);
     
     
     // Pre-compute all Hist-equalized values once. Could do that in CPU maybe, should test
@@ -157,9 +158,60 @@ void fix_image_gpu_industrial(Image& to_fix)
     // Will be useful when I refactor types to gain performances
     // to_fix.char_buffer = malloc(new_size * sizeof(char));
 
-    // I Should dig into cudaMemcpyAsync 
-    cudaMemcpy(to_fix.buffer, buffer2.data(), new_size * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpyAsync(to_fix.buffer, buffer2.data(), new_size * sizeof(int), cudaMemcpyDeviceToHost, stream);
     
+    // Free stream
+    cudaStreamDestroy(stream);
     // Ok i guess i love thrust now
+    return;
+}
+
+// Likely perforamce loss because only ~30 images, but would scale pretty well !!!
+void sort_gpu_industrial(std::vector<Image::ToSort>& to_sort, int nb_images)
+{
+    // Define the stream for current job
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);    
+    auto exec = thrust::cuda::par.on(stream);
+
+    rmm::device_uvector<int> d_totals(nb_images, stream);
+    rmm::device_uvector<int> d_ids(nb_images, stream);
+    std::vector<int> h_totals(nb_images);
+    std::vector<int> h_ids(nb_images);
+
+    // Split
+    for (std::size_t i = 0; i < nb_images; ++i) {
+        h_totals[i] = to_sort[i].total;
+        h_ids[i] = to_sort[i].id;
+    }
+
+    // Copy
+    cudaMemcpyAsync(d_totals.data(), h_totals.data(), nb_images * sizeof(int),
+        cudaMemcpyHostToDevice, stream);
+    
+    cudaMemcpyAsync(d_ids.data(), h_ids.data(), nb_images * sizeof(int),
+        cudaMemcpyHostToDevice, stream);
+
+    // Sort on device
+    thrust::sort_by_key(
+        exec,
+        d_totals.begin(),
+        d_totals.end(),
+        d_ids.begin()
+    );
+
+    cudaMemcpyAsync(h_totals.data(), d_totals.data(), nb_images * sizeof(int),
+    cudaMemcpyDeviceToHost, stream);
+
+    cudaMemcpyAsync(h_ids.data(), d_ids.data(), nb_images * sizeof(int),
+    cudaMemcpyDeviceToHost, stream);
+
+    // Recombine into the original struct vector
+    for (std::size_t i = 0; i < nb_images; ++i) {
+        to_sort[i].total = h_totals[i];
+        to_sort[i].id = h_ids[i];
+    }
+    
+    cudaStreamDestroy(stream);
     return;
 }

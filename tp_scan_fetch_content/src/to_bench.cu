@@ -98,13 +98,14 @@ void sklansky_scan(raft::device_span<T> buffer,
 
     for (int i = 1; i < blockDim.x * 2; i *= 2)
     {
+        // Thanks to the paper and a headache here is the indexing
         int j = i - 1 + 2 * (threadIdx.x - threadIdx.x % i);
         int k = threadIdx.x % i;
         sdata[j + k + 1] += sdata[j];
         __syncthreads();
     }
 
-    // Block result is done, need to add previous block results
+    // Block result is done, starting decoupled lookback
     if (threadIdx.x == 0)
     {
         cuda::atomic_ref<int, cuda::thread_scope_device> my_state(states[my_block_id]);
