@@ -39,8 +39,6 @@ __global__ void radix_sort_kernel(raft::device_span<int> in, raft::device_span<i
     __syncthreads();
 
 
-
-
     // Load local histogram into inclusive cumulative histogram
     if (tid < NB_BINS)
     {
@@ -64,35 +62,44 @@ __global__ void radix_sort_kernel(raft::device_span<int> in, raft::device_span<i
     if (tid == 0)
         exc_cum_hist[0] = 0;
     
-    
-    if (tid == 0)
-    {
-        for (int i = 0; i < NB_BINS; ++i)
-        {
-            out[i] = exc_cum_hist[i];
-        }
-    }
-    //return;
-    
     __syncthreads();
     // Place the values in the correct position
     int my_threads_counter = 0;
     int my_threads_val = tid;
     for (int i = 0; i < size; ++i)
     {
-        
-        if (i < size && in[i] == my_threads_val)
+        int base_value = in[i];
+        int value = base_value;
+        for (int it = 0; it < iteration; ++it)
         {
-            out[exc_cum_hist[my_threads_val] + my_threads_counter] = my_threads_val;
+            value /= NB_BINS;
+        }
+        if (i < size && (value % NB_BINS) == my_threads_val)
+        {
+            out[exc_cum_hist[my_threads_val] + my_threads_counter] = base_value;
             my_threads_counter++;
         }
     }
 
     // And voila ? one round of radix sort done ?
+    return;
+
+        __syncthreads();
+    if (tid ==0)
+    {
+        for (int i = 0; i < NB_BINS; ++i)
+        {
+            out[i] = exc_cum_hist[i];
+        }
+    }
+    __syncthreads();
+    return;
+
+
 
 }
 
-void radix_sort(std::vector<int>& array)
+void radix_sort(std::vector<int>& array, int max_value)
 {
     cudaStream_t stream;
     cudaStreamCreate(&stream);
@@ -111,20 +118,26 @@ void radix_sort(std::vector<int>& array)
     //size_t blocks = (threads + thread_per_block - 1) / thread_per_block;
     // each thread = 4 pixels and 4 predicate values
     //size_t shared_memory_size = thread_per_block * 4 * 2 * sizeof(int);
-    radix_sort_kernel<<<1, size, 0, stream>>>
-        (d_span_1, d_span_2, d_span_1.size(), 0);
+    for (int iteration = 0; max_value > 0; iteration++)
+    {
+        radix_sort_kernel<<<1, size, 0, stream>>>
+            (d_span_1, d_span_2, size, iteration);
+        max_value /= NB_BINS;
+        std::swap(d_span_1, d_span_2);
+    }
+
     cudaStreamSynchronize(stream);
-    cudaMemcpyAsync(array.data(), buff_2.data(), array.size() * sizeof(int), cudaMemcpyDeviceToHost, stream);
+    cudaMemcpyAsync(array.data(), d_span_1.data(), array.size() * sizeof(int), cudaMemcpyDeviceToHost, stream);
     cudaStreamSynchronize(stream);
     cudaStreamDestroy(stream);
 }
 
 bool test_radix_sort()
 {
-    int n = 10; // nb of values in array
+    int n = 1024; // nb of values in array
     std::vector<int> array(n);
     std::mt19937 rng(42);
-    int max = NB_BINS;
+    int max = 10000000;
     for (int& x : array)
         x = rng() % max;
 
@@ -140,7 +153,7 @@ bool test_radix_sort()
 
     // GPU sort timing
     auto start_gpu = std::chrono::high_resolution_clock::now();
-    radix_sort(gpu_array);
+    radix_sort(gpu_array, max - 1);
     auto end_gpu = std::chrono::high_resolution_clock::now();
     double gpu_time = std::chrono::duration<double, std::milli>(end_gpu - start_gpu).count();
 
@@ -149,6 +162,7 @@ bool test_radix_sort()
     bool matches = (cpu_array == gpu_array);
 
     std::cout << "nb values: " << n << "\n";
+    std::cout << "max value: " << max << "\n";
     std::cout << "CPU sort time: " << cpu_time << " ms\n";
     std::cout << "GPU sort time: " << gpu_time << " ms\n";
     if (ok && matches)
