@@ -1,17 +1,5 @@
 #include "radix_sort.cuh"
 
-#include <assert.h>
-#include <raft/core/device_span.hpp>
-
-#include <rmm/device_uvector.hpp>
-#include <rmm/device_scalar.hpp>
-#include <iostream>
-#include <vector>
-#include <algorithm>
-#include <random>
-#include <chrono>
-#include <cuda_runtime.h>
-
 #define NB_BINS 10
 
 
@@ -99,18 +87,9 @@ __global__ void radix_sort_kernel(raft::device_span<int> in, raft::device_span<i
 
 }
 
-void radix_sort(std::vector<int>& array, int max_value)
+void radix_sort(rmm::device_uvector<int>& in, rmm::device_uvector<int>& out, int max_value, cudaStream_t stream)
 {
-    cudaStream_t stream;
-    cudaStreamCreate(&stream);
-
-    int size = array.size();
-    rmm::device_uvector<int> buff_1(size, stream);
-    rmm::device_uvector<int> buff_2(size, stream);
-    cudaMemcpyAsync(buff_1.data(), array.data(), size * sizeof(int), cudaMemcpyHostToDevice, stream);
-
-    raft::device_span<int> d_span_1(buff_1.data(), buff_1.size());
-    raft::device_span<int> d_span_2(buff_2.data(), buff_2.size());
+    int size = in.size();
 
     //size_t max_threads = 1024;
     //size_t thread_per_block = max_threads;
@@ -121,17 +100,20 @@ void radix_sort(std::vector<int>& array, int max_value)
     for (int iteration = 0; max_value > 0; iteration++)
     {
         radix_sort_kernel<<<1, size, 0, stream>>>
-            (d_span_1, d_span_2, size, iteration);
-        max_value /= NB_BINS;
-        std::swap(d_span_1, d_span_2);
+            (raft::device_span<int>(in.data(), size),
+            raft::device_span<int>(out.data(), size),
+            size, 
+            iteration);
+        
+            max_value /= NB_BINS;
+        cudaStreamSynchronize(stream);
+        std::swap(in, out);
     }
 
-    cudaStreamSynchronize(stream);
-    cudaMemcpyAsync(array.data(), d_span_1.data(), array.size() * sizeof(int), cudaMemcpyDeviceToHost, stream);
-    cudaStreamSynchronize(stream);
-    cudaStreamDestroy(stream);
+    std::swap(in, out);
 }
 
+// Just run this function to test perfs and correctness
 bool test_radix_sort()
 {
     int n = 1024; // nb of values in array
@@ -141,38 +123,106 @@ bool test_radix_sort()
     for (int& x : array)
         x = rng() % max;
 
-    std::vector<int> base = array;
     std::vector<int> cpu_array = array;
     std::vector<int> gpu_array = array;
+    std::vector<int> cub_array = array;
 
+    // ---------------------------
     // CPU sort timing
+    // ---------------------------
     auto start_cpu = std::chrono::high_resolution_clock::now();
     std::sort(cpu_array.begin(), cpu_array.end());
     auto end_cpu = std::chrono::high_resolution_clock::now();
     double cpu_time = std::chrono::duration<double, std::milli>(end_cpu - start_cpu).count();
 
-    // GPU sort timing
+    // ---------------------------
+    // My GPU radix sort
+    // ---------------------------
+    cudaStream_t my_gpu_stream;
+    cudaStreamCreate(&my_gpu_stream);
+
+    rmm::device_uvector<int> my_gpu_d_in(cpu_array.size(), my_gpu_stream);
+    rmm::device_uvector<int> my_gpu_d_out(cpu_array.size(), my_gpu_stream);
+    cudaMemcpyAsync(my_gpu_d_in.data(), cpu_array.data(), cpu_array.size() * sizeof(int),
+                    cudaMemcpyHostToDevice, my_gpu_stream);
     auto start_gpu = std::chrono::high_resolution_clock::now();
-    radix_sort(gpu_array, max - 1);
+    radix_sort(my_gpu_d_in, my_gpu_d_out, max - 1, my_gpu_stream);
     auto end_gpu = std::chrono::high_resolution_clock::now();
     double gpu_time = std::chrono::duration<double, std::milli>(end_gpu - start_gpu).count();
+    cudaMemcpyAsync(gpu_array.data(), my_gpu_d_out.data(), gpu_array.size() * sizeof(int),
+                    cudaMemcpyDeviceToHost, my_gpu_stream);
+    cudaStreamDestroy(my_gpu_stream);
+    
+    // ---------------------------
+    // CUB reference GPU sort
+    // ---------------------------
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
 
+    rmm::device_uvector<int> d_in(cub_array.size(), stream);
+    rmm::device_uvector<int> d_out(cub_array.size(), stream);
+    cudaMemcpyAsync(d_in.data(), cub_array.data(), cub_array.size() * sizeof(int),
+                    cudaMemcpyHostToDevice, stream);
+
+    void* d_temp_storage = nullptr;
+    size_t temp_storage_bytes = 0;
+
+    // Query temp storage size
+    cub::DeviceRadixSort::SortKeys(
+        d_temp_storage, temp_storage_bytes,
+        d_in.data(), d_out.data(), n, 0, sizeof(int) * 8, stream);
+
+    // Allocate temp storage
+    cudaMallocAsync(&d_temp_storage, temp_storage_bytes, stream);
+
+    auto start_cub = std::chrono::high_resolution_clock::now();
+    cub::DeviceRadixSort::SortKeys(
+        d_temp_storage, temp_storage_bytes,
+        d_in.data(), d_out.data(), n, 0, sizeof(int) * 8, stream);
+    cudaStreamSynchronize(stream);
+    auto end_cub = std::chrono::high_resolution_clock::now();
+
+    double cub_time = std::chrono::duration<double, std::milli>(end_cub - start_cub).count();
+
+    cudaMemcpyAsync(cub_array.data(), d_out.data(), cub_array.size() * sizeof(int),
+                    cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+
+    cudaFreeAsync(d_temp_storage, stream);
+    cudaStreamDestroy(stream);
+
+    // ---------------------------
     // Validation
+    // ---------------------------
     bool ok = std::is_sorted(gpu_array.begin(), gpu_array.end());
-    bool matches = (cpu_array == gpu_array);
+    bool matches_cpu = (cpu_array == gpu_array);
+    bool matches_cub = (cub_array == gpu_array);
 
     std::cout << "nb values: " << n << "\n";
     std::cout << "max value: " << max << "\n";
     std::cout << "CPU sort time: " << cpu_time << " ms\n";
-    std::cout << "GPU sort time: " << gpu_time << " ms\n";
-    if (ok && matches)
-        std::cout << "GPU sort is sorted ! ✅" << std::endl;
+    std::cout << "My  sort time: " << gpu_time << " ms\n";
+    std::cout << "CUB sort time: " << cub_time << " ms\n";
+
+    if (ok && matches_cpu && matches_cub)
+        std::cout << "✅ GPU radix sort matches both CPU & CUB results!" << std::endl;
     else
     {
-        std::cout << "GPU sort is NOT sorted ! ❌" << std::endl;
-        for (int i = 0; i < n; ++i)
-            std::cout << "CPU[" << i << "]=" << cpu_array[i] << " VS GPU[" << i << "]=" << gpu_array[i] << std::endl;
+        if (false)
+        {
+            std::cout << "❌ GPU sort mismatch!\n";
+            for (int i = 0; i < n; ++i)
+            {
+                if (cpu_array[i] != gpu_array[i] || cub_array[i] != gpu_array[i])
+                {
+                    std::cout << "Index " << i
+                            << ": CPU=" << cpu_array[i]
+                            << " GPU=" << gpu_array[i]
+                            << " CUB=" << cub_array[i] << "\n";
+                }
+            }
+        }
     }
 
-    return ok;
+    return ok && matches_cpu && matches_cub;
 }
