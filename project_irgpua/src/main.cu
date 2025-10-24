@@ -4,6 +4,7 @@
 #include "fix_cpu.cuh"
 #include "fix_gpu_handmade.cuh"
 #include "fix_gpu_industrial.cuh"
+#include "radix_sort.cuh"
 
 #include <vector>
 #include <iostream>
@@ -15,6 +16,9 @@
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
+    test_radix_sort();
+    return;
+
     // Choose processing mode here
     // {CPU, GPU_Handmade, GPU_Industrial} <-- copy-paste one of these
     const ProcessingMode mode = ProcessingMode::GPU_Industrial;
@@ -126,7 +130,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
             std::cerr << "Sorting error on image id :" << to_sort[i].id << std::endl;
             return 1;
         }
-    std::cout << "Sorting OK!" << std::endl;
+    std::cout << "Sorting OK!  ✅" << std::endl;
     std::cout << "Done, the internet is safe now :)" << std::endl;
 
     // Cleaning
