@@ -36,8 +36,8 @@ __global__ void radix_sort_kernel(raft::device_span<int> in, raft::device_span<i
         }
         atomicAdd(&shared_hist[value % NB_BINS], 1);
     }
-    __syncthreads();
 
+    __syncthreads();
 
 
 
@@ -50,8 +50,9 @@ __global__ void radix_sort_kernel(raft::device_span<int> in, raft::device_span<i
     __syncthreads();
 
 
+
     // Compute local Exclusive Cumulative Histogram
-    for (int i = 1; i < NB_BINS; i *= 2)
+    for (int i = 1; i < NB_BINS * 2; i *= 2)
     {
         int j = i - 1 + 2 * (tid - tid % i);
         int k = tid % i;
@@ -61,18 +62,21 @@ __global__ void radix_sort_kernel(raft::device_span<int> in, raft::device_span<i
     }
     __syncthreads();
 
-    if (tid == 0)
-        exc_cum_hist[0] = 0;
-    
-    
+
     if (tid == 0)
     {
         for (int i = 0; i < NB_BINS; ++i)
         {
-            out[i] = exc_cum_hist[i];
+            out[i] = inc_cum_hist[i];
         }
     }
     //return;
+
+    if (tid == 0)
+        exc_cum_hist[0] = 0;
+    
+    
+
     
     __syncthreads();
     // Place the values in the correct position
@@ -121,7 +125,7 @@ void radix_sort(std::vector<int>& array)
 
 bool test_radix_sort()
 {
-    int n = 10; // nb of values in array
+    int n = 1000; // nb of values in array
     std::vector<int> array(n);
     std::mt19937 rng(42);
     int max = NB_BINS;
@@ -149,6 +153,9 @@ bool test_radix_sort()
     bool matches = (cpu_array == gpu_array);
 
     std::cout << "nb values: " << n << "\n";
+    std::cout << "nb bins: " << NB_BINS << "\n";
+    std::cout << "values: 0-" << max << "\n";
+
     std::cout << "CPU sort time: " << cpu_time << " ms\n";
     std::cout << "GPU sort time: " << gpu_time << " ms\n";
     if (ok && matches)
