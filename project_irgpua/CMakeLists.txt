@@ -10,6 +10,10 @@ include(rapids-find)
 
 rapids_cuda_init_architectures(tp_reduce)
 
+# I added that one, maybe will create bugs 
+
+set(CMAKE_CUDA_ARCHITECTURES 75 CACHE STRING "CUDA architectures" FORCE) 
+
 rapids_cpm_init()
 include(cmake/thirdparty/get_cccl.cmake)
 include(cmake/thirdparty/get_rmm.cmake)
