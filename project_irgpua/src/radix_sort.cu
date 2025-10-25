@@ -1,7 +1,7 @@
 #include "radix_sort.cuh"
 #include <cuda/atomic>
 
-#define NB_BINS 10
+#define NB_BINS 2048
 #define NB_VALUES_PER_BLOCK 1024
 #define THREAD_PER_BLOCK 1024
 
@@ -227,18 +227,6 @@ __global__ void radix_sort_kernel(raft::device_span<int> in,
 
     // And voila ? one round of radix sort done ?
     return;
-
-    /*
-     __syncthreads();
-    if (tid ==0)
-    {
-        for (int i = 0; i < NB_BINS; ++i)
-        {
-            out[i] = exc_cum_hist[i];
-        }
-    }
-    __syncthreads();
-    return;*/
 }
 
 void radix_sort(rmm::device_uvector<int>& in, rmm::device_uvector<int>& out, int max_value, cudaStream_t stream)
@@ -263,8 +251,9 @@ void radix_sort(rmm::device_uvector<int>& in, rmm::device_uvector<int>& out, int
         cudaMemsetAsync(states.data(), 0, states.size() * sizeof(int), stream);
         cudaMemsetAsync(local_hists.data(), 0, local_hists.size() * sizeof(int), stream);
         cudaMemsetAsync(prefix_summed_hists.data(), 0, prefix_summed_hists.size() * sizeof(int), stream);
-
-        // Re-compute global histogram
+        
+        // Re-compute global histogram very slow for the moment but just need working code for that
+        // This is around 10 ms rn 
         set_global_hist_to_0<<<64, thread_per_block, 0, stream>>>(); // Arbitrary launch with 64 blocks could tweak it later
         init_global_hist<<<1, thread_per_block, 0, stream>>>(raft::device_span<int>(in.data(), size), iteration);
         global_hist_cum_sum<<<1, 1, 0, stream>>>(raft::device_span<int>(in.data(), size));
@@ -311,7 +300,7 @@ bool test_radix_sort()
     int n = 2000000; // nb of values in array
     std::vector<int> array(n);
     std::mt19937 rng(42);
-    int max = 1000;
+    int max = 100000;
     for (int& x : array)
         x = rng() % max;
 
@@ -401,7 +390,7 @@ bool test_radix_sort()
     else
     {
         std::cout << "❌ GPU sort mismatch!\n";
-        if (true)
+        if (false)
         {
             for (int i = 0; i < n; ++i)
             {
