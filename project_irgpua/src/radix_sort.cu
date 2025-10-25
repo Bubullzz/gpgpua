@@ -1,7 +1,9 @@
 #include "radix_sort.cuh"
 #include <cuda/atomic>
 
-#define NB_BINS 2048
+#define NB_BITS_MASK 10
+#define NB_BINS (1 << NB_BITS_MASK) // 1024
+#define MASK (NB_BINS - 1)
 #define NB_VALUES_PER_BLOCK 1024
 #define THREAD_PER_BLOCK 1024
 
@@ -21,6 +23,7 @@ __global__ void print_global_hist()
 
 __device__ int get_bin_place(int value, int iteration)
 {
+    return (value >> (iteration * NB_BITS_MASK)) & MASK;
     for (int i = 0; i < iteration; ++i)
     {
         value /= NB_BINS;
