@@ -1,10 +1,11 @@
 #include "radix_sort.cuh"
 #include <cuda/atomic>
 
+// Can tweak these to try and find better perf
 #define NB_BITS_MASK 10
-#define NB_BINS (1 << NB_BITS_MASK) // 1024
+#define NB_BINS (1 << NB_BITS_MASK)
 #define MASK (NB_BINS - 1)
-#define NB_VALUES_PER_BLOCK 1024
+#define NB_VALUES_PER_BLOCK 2048
 #define THREAD_PER_BLOCK 1024
 
 __device__ int global_hist[NB_BINS];
@@ -24,11 +25,6 @@ __global__ void print_global_hist()
 __device__ int get_bin_place(int value, int iteration)
 {
     return (value >> (iteration * NB_BITS_MASK)) & MASK;
-    for (int i = 0; i < iteration; ++i)
-    {
-        value /= NB_BINS;
-    }
-    return value % NB_BINS;
 }
 
 // Just sets all of the histograms values to 0
@@ -63,7 +59,7 @@ __global__ void init_global_hist(raft::device_span<int> in, int iteration)
 
 }
 
-// dummy version for the moment
+// slow version bc i wanna focus on radix sort first
 __global__ void global_hist_cum_sum(raft::device_span<int> in)
 {
     if (blockIdx.x == 0 && threadIdx.x == 0)
@@ -136,6 +132,8 @@ __global__ void radix_sort_kernel(raft::device_span<int> in,
         offset += blockDim.x;
     }
     __syncthreads();
+
+    // Inform other blocks that my local histogram is ready
     if (tid == 0)
     {
         cuda::atomic_ref<int, cuda::thread_scope_device> my_state(states[my_block_id]);
@@ -145,7 +143,6 @@ __global__ void radix_sort_kernel(raft::device_span<int> in,
 
     int currently_looking_at = my_block_id - 1;
     // Compute prefix sum of previous histograms
-
     while (true)
     {
         if (currently_looking_at < 0)
@@ -189,10 +186,10 @@ __global__ void radix_sort_kernel(raft::device_span<int> in,
         prefix_summed_hists[my_block_id * NB_BINS + offset] = my_exclusive_prefix_sum[offset] + my_local_hist[offset];
         offset += blockDim.x;
     }    
+    __syncthreads();
 
     // Now prefix_summed_hists[my_block_id * NB_BINS] contains the full inclusive prefix sum from block_0 to my_block_id
     // So our state is 2 : done !
-    __syncthreads();
     if (threadIdx.x == 0)
     {
         cuda::atomic_ref<int, cuda::thread_scope_device> my_state(states[my_block_id]);
@@ -217,16 +214,10 @@ __global__ void radix_sort_kernel(raft::device_span<int> in,
         if (value % THREAD_PER_BLOCK == threadIdx.x)
         {
             int destination = global_hist[value] + my_exclusive_prefix_sum[value] + already_seen[value / THREAD_PER_BLOCK];
-            //printf("i = %d, writing %d to %d with glob_hist_val = %d, me_ex_pref = %d, already_seen = %d\n", i, base_value, destination, 
-            //    global_hist[value], my_exclusive_prefix_sum[value], already_seen[value / THREAD_PER_BLOCK]);
             already_seen[value / THREAD_PER_BLOCK] += 1;
             out[destination] = base_value;
         }
-        __syncthreads();
-
     }
-
-
 
     // And voila ? one round of radix sort done ?
     return;
@@ -235,7 +226,6 @@ __global__ void radix_sort_kernel(raft::device_span<int> in,
 void radix_sort(rmm::device_uvector<int>& in, rmm::device_uvector<int>& out, int max_value, cudaStream_t stream)
 {
     int size = in.size();
-
     size_t thread_per_block = THREAD_PER_BLOCK;
     size_t nb_blocks = (size + NB_VALUES_PER_BLOCK - 1) / NB_VALUES_PER_BLOCK;
 
