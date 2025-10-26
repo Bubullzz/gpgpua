@@ -59,6 +59,7 @@ void brent_kung_scan(raft::device_span<T> buffer)
 
     // Post-Reduce step
     // keep using offset to manage not power of two sizes
+    // Sorry for readability !!!!
     for (int two_pow_i_plus_one = two_pow_i; two_pow_i_plus_one > 1; two_pow_i_plus_one /= 2)
     {
         int j = two_pow_i_plus_one + two_pow_i_plus_one * threadIdx.x;
@@ -145,8 +146,8 @@ void sklansky_scan(raft::device_span<T> buffer,
 
 void your_scan(rmm::device_uvector<int>& buffer)
 {
-    size_t size = buffer.size() / 2; // assuming even size for simplicity + 2 elements per thread
-    size_t threads_per_block = std::min<size_t>(1024, size); // Hardcoding max threads per block is REALLY faster
+    size_t size = buffer.size() / 2; // assuming even size for simplicity and computing 2 elements per thread
+    size_t threads_per_block = std::min<size_t>(1024, size); // 1024 threads bc it's the max on these machines
     size_t nb_blocks = (size + threads_per_block -1) / (threads_per_block);
     size_t shared_memory_size = sizeof(int) * threads_per_block * 2;
 
@@ -166,11 +167,4 @@ void your_scan(rmm::device_uvector<int>& buffer)
         raft::device_span<int>(global_sums.data(), nb_blocks));
 
     CUDA_CHECK_ERROR(cudaStreamSynchronize(buffer.stream()));
-    if (false) // Debug print
-    {
-        std::vector<int> host_buf(buffer.size());
-        cudaMemcpy(host_buf.data(), buffer.data(), buffer.size() * sizeof(int), cudaMemcpyDeviceToHost);
-        for (size_t i = 0; i < buffer.size(); ++i)
-            printf("buffer[%zu] = %d\n", i, host_buf[i]);
-    }
 }

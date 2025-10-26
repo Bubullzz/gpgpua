@@ -62,7 +62,7 @@ void fix_image_gpu_industrial(Image& to_fix)
 
     // Apply adds and substracts
     int4* buffer2_as_int4 = reinterpret_cast<int4*>(buffer2.begin());
-    size_t num_int4 = (new_size + 3) / 4;
+    size_t num_int4 = (new_size + 4 - 1) / 4;
     int4* buffer1_as_int4 = reinterpret_cast<int4*>(buffer1.begin());
     thrust::transform(
         exec,
@@ -133,7 +133,7 @@ void fix_image_gpu_industrial(Image& to_fix)
         cum_hist_buffer.end(),
         cum_hist_buffer.begin(),
         [=] __device__ (int val) {
-            return static_cast<int>((val - cdf_min) / divider * 255.0f + 0.5f); // cast<int>(x + 0.5f) <==> roundf(x)
+            return static_cast<int>((val - cdf_min) / divider * 255.0f + 0.5f); // cast<int>(x + 0.5f) <=> roundf(x)
         }
     );
     
@@ -162,6 +162,7 @@ void fix_image_gpu_industrial(Image& to_fix)
     
     // Free stream
     cudaStreamDestroy(stream);
+
     // Ok i guess i love thrust now
     return;
 }
@@ -201,10 +202,10 @@ void sort_gpu_industrial(std::vector<Image::ToSort>& to_sort, int nb_images)
     );
 
     cudaMemcpyAsync(h_totals.data(), d_totals.data(), nb_images * sizeof(int),
-    cudaMemcpyDeviceToHost, stream);
+        cudaMemcpyDeviceToHost, stream);
 
     cudaMemcpyAsync(h_ids.data(), d_ids.data(), nb_images * sizeof(int),
-    cudaMemcpyDeviceToHost, stream);
+        cudaMemcpyDeviceToHost, stream);
 
     // Recombine into the original struct vector
     for (std::size_t i = 0; i < nb_images; ++i) {

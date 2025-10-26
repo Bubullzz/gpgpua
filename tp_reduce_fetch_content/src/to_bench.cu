@@ -53,6 +53,7 @@ void kernel_your_reduce(raft::device_span<const T> buffer, raft::device_span<T> 
     }
 
     __syncthreads();
+    #pragma unroll
     for (int i = blockDim.x/2; i > 32; i/=2)
     {
         if (threadIdx.x < i){
@@ -77,7 +78,7 @@ void your_reduce(rmm::device_uvector<int>& buffer,
                  rmm::device_scalar<int>& total)
 {
     size_t size = buffer.size() / 2; 
-    size_t thread_per_block = std::min<size_t>(1024, size); // Hardcoding max threads per block is REALLY faster
+    size_t thread_per_block = std::min<size_t>(1024, size); // Hardcoding max threads per block is REALLY faster than querying the gpu
     size_t blocks_num = 8; // enter wwhatever size, will increase work per thread if lower, i think power of 2 should be better
     size_t shared_memory_size = sizeof(int) * thread_per_block;
 

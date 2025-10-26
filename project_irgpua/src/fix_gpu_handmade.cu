@@ -7,6 +7,7 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/device_scalar.hpp>
 
+// Kernel should be launched with 4 values per thread so the mask can be applied without a modulo operation
 __global__ void fix_image(raft::device_span<int> buffer) {
     extern __shared__ int shared[];
     int* predicate = &shared[blockDim.x * 4];
@@ -33,7 +34,7 @@ __global__ void fix_image(raft::device_span<int> buffer) {
     }
     __syncthreads();
     
-    // shitty scan for tests
+    // bad scan for tests
     if (threadIdx.x == 0) {
         for (int i = 1; i < blockDim.x * 4; ++i) {
             predicate[i] += predicate[i - 1];
@@ -43,7 +44,6 @@ __global__ void fix_image(raft::device_span<int> buffer) {
     __syncthreads();
 
     // NEED TO PROPAGATE SCAN FOR EVERY BLOCK
-
 
     // Remove garbage values
     int v0, v1, v2, v3;
@@ -71,32 +71,11 @@ __global__ void fix_image(raft::device_span<int> buffer) {
     }
     __syncthreads();
 
-    for (int i = 0; i < 4; ++i) {
-        if (shared[threadIdx.x * 4 + i] == -27)
-            printf("Error at index %d: value %d\n", idx + i, buffer[idx + i]);
-    }
-
-    // Apply map to fix pixels
-    buffer[idx + 0] = shared[threadIdx.x * 4 + 0] + 1;
-    buffer[idx + 1] = shared[threadIdx.x * 4 + 1] - 5;
-    buffer[idx + 2] = shared[threadIdx.x * 4 + 2] + 3;
-    buffer[idx + 3] = shared[threadIdx.x * 4 + 3] - 8;
-
-    /*
-        for (int i = 0; i < 4; ++i) {
-        if (buffer[idx + i] < 0 || buffer[idx + i] > 255)
-            printf("Error at index %d: value %d\n", idx + i, buffer[idx + i]);
-    }*/
 
 }
 
 void fix_image_gpu_handmade(Image& to_fix) { //rmm::device_uvector<int>& buffer, int size) {
-    /*size_t max_threads = 1024;
-    size_t thread_per_block = max_threads;
-    size_t threads = size / 4; // each thread manages 4 pixels (useful for +5 -1 etc...)
-    size_t blocks = (threads + thread_per_block - 1) / thread_per_block;
-    // each thread = 4 pixels and 4 predicate values
-    size_t shared_memory_size = thread_per_block * 4 * 2 * sizeof(int);
-    fix_image<<<blocks, thread_per_block, shared_memory_size, buffer.stream()>>>(raft::device_span<int>(buffer.data(), size));
-    cudaStreamSynchronize(buffer.stream()); */
+    // Kernel is not finished :( But i did radix sort instead so it is worth it !!!
+    std::cout << "GPU Handmade version has not been implemented yet !!!! Abort !!" << std::endl;
+    return;
 }

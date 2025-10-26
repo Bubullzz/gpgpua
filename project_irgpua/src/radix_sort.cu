@@ -10,23 +10,6 @@
 
 __device__ int global_hist[NB_BINS];
 
-__global__ void print_global_hist()
-{
-    if (blockIdx.x == 0 && threadIdx.x == 0)
-    {
-        printf("global_hist:\n");
-        for (int i = 0; i < NB_BINS; ++i)
-        {
-            printf("[%d] = %d\n", i, global_hist[i]);
-        }
-    }
-}
-
-__device__ int get_bin_place(int value, int iteration)
-{
-    return (value >> (iteration * NB_BITS_MASK)) & MASK;
-}
-
 // Just sets all of the histograms values to 0
 __global__ void set_global_hist_to_0()
 {
@@ -40,6 +23,14 @@ __global__ void set_global_hist_to_0()
         pos += stride;
     }
 }
+
+
+// Returns the right bin at the given iteration for a certain value
+__device__ int get_bin_place(int value, int iteration)
+{
+    return (value >> (iteration * NB_BITS_MASK)) & MASK;
+}
+
 
 __global__ void init_global_hist(raft::device_span<int> in, int iteration)
 {
@@ -76,7 +67,8 @@ __global__ void global_hist_cum_sum(raft::device_span<int> in)
     return;
 }
 
-__global__ void radix_sort_kernel(raft::device_span<int> in,
+__global__ void radix_sort_kernel(
+    raft::device_span<int> in,
     raft::device_span<int> out,
     raft::device_span<int> states,
     raft::device_span<int> local_hists,
@@ -85,19 +77,16 @@ __global__ void radix_sort_kernel(raft::device_span<int> in,
     int* block_num)
 {
     // Static shared memory allocation
-    __shared__ int smem[NB_BINS * 2]; // Room for local hist and prefix sum that gets computed
+    __shared__ int smem[NB_BINS * 2]; // Room for local hist and prefix sum that gets computed, pretty sure i can divide this by two with some shenanigans
     int *my_local_hist = &smem[0];
-    int *my_exclusive_prefix_sum = &smem[NB_BINS]; // Room for local hist and prefix sum that gets computed
-
-    //int *inc_cum_hist = &shared_hist[NB_BINS + 1]; // inclusive cum hist
-    //int *exc_cum_hist = &shared_hist[NB_BINS]; // exclusive cum hist
+    int *my_exclusive_prefix_sum = &smem[NB_BINS];
  
     __shared__ int my_block_id;
     __shared__ int current_flag;
-    cuda::atomic_ref<int, cuda::thread_scope_device> block(*block_num);
-
+    
     if (threadIdx.x == 0)
     {
+        cuda::atomic_ref<int, cuda::thread_scope_device> block(*block_num);
         my_block_id = block.fetch_add(1);
     }
     __syncthreads();
@@ -162,6 +151,7 @@ __global__ void radix_sort_kernel(raft::device_span<int> in,
         else // global value ready
             current_hist = &prefix_summed_hists[NB_BINS * currently_looking_at];
 
+        // Add the new histogram to current sum
         offset = tid;
         while (offset < NB_BINS)
         {
@@ -196,7 +186,6 @@ __global__ void radix_sort_kernel(raft::device_span<int> in,
         my_state.store(2);
         my_state.notify_all();
     }
-    __syncthreads();
 
     // We have global offset from global_hist, local offset in my_exclusive_prefix_sum, you know what it means... #heheha
     int base_offset = NB_VALUES_PER_BLOCK * my_block_id;
@@ -236,7 +225,7 @@ void radix_sort(rmm::device_uvector<int>& in, rmm::device_uvector<int>& out, int
     rmm::device_uvector<int> prefix_summed_hists(all_hists_size, stream);
     
     std::cout << "blocks number :" << nb_blocks << std::endl;
-
+    
     for (int iteration = 0; max_value > 0; iteration++)
     {
         // Reinitialize memory

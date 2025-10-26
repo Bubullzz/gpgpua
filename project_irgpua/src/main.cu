@@ -16,9 +16,12 @@
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
-    test_radix_sort();
-    return;
-
+    bool run_radix_sort_test = false;
+    if (run_radix_sort_test)
+    {
+        test_radix_sort();
+        return;
+    }
     // Choose processing mode here
     // {CPU, GPU_Handmade, GPU_Industrial} <-- copy-paste one of these
     const ProcessingMode mode = ProcessingMode::GPU_Industrial;
